@@ -1,6 +1,6 @@
 [project]
 name = "redhat-status-mcp"
-version = "0.1.0"
+dynamic = ["version"]
 description = "MCP server exposing Red Hat status page data to LLMs"
 readme = "README.md"
 authors = [{ name = "Major Hayden", email = "major@mhtx.net" }]
@@ -14,8 +14,8 @@ dependencies = [
 redhat-status-mcp = "redhat_status_mcp:main"
 
 [build-system]
-requires = ["uv_build>=0.10.4,<0.11.0"]
-build-backend = "uv_build"
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
@@ -38,6 +38,12 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/redhat_status_mcp"]
 
 [tool.coverage.run]
 source = ["redhat_status_mcp"]
