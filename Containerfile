@@ -1,10 +1,16 @@
 # Stage 1: Builder — UBI 10 full image has Python 3.12 + pip
 FROM registry.access.redhat.com/ubi10:latest AS builder
 
+ARG PSEUDO_VERSION=0.1.0a
+
 WORKDIR /build
 
 # Install pip then uv for fast, reproducible dependency resolution
 RUN dnf install -y python3-pip && dnf clean all && python3 -m pip install uv
+
+# Provide the version to avoid the need to pass in the .git directory.
+# https://setuptools-scm.readthedocs.io/en/latest/usage/#with-dockerpodman
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${PSEUDO_VERSION}
 
 # Copy dependency files first for layer caching
 COPY pyproject.toml uv.lock README.md ./
@@ -20,7 +26,23 @@ RUN uv pip install . --no-deps && \
 # Stage 2: Runtime — minimal UBI 10 Python 3.12 image
 FROM registry.access.redhat.com/ubi10/python-312-minimal:latest
 
+ARG PSEUDO_VERSION=0.1.0a
+ARG VERSION=0.1.0a
+
 WORKDIR /app
+
+LABEL com.redhat.component=redhat-status-mcp
+LABEL description="MCP server exposing Red Hat status page data to LLMs"
+LABEL io.k8s.description="MCP server exposing Red Hat status page data to LLMs"
+LABEL io.k8s.display-name="Red Hat Status MCP"
+LABEL io.openshift.tags="rhel,mcp,status"
+LABEL konflux.additional-tags=${VERSION}
+LABEL name=redhat-status-mcp
+LABEL release=${PSEUDO_VERSION}
+LABEL summary="Red Hat Status MCP Server"
+LABEL url="https://gitlab.cee.redhat.com/rhel-lightspeed/enhanced-shell/redhat-status-mcp"
+LABEL vendor="Red Hat, Inc."
+LABEL version=${VERSION}
 
 # Copy the virtual environment from builder
 COPY --from=builder /build/.venv /app/.venv
