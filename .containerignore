@@ -1,0 +1,13 @@
+.venv/
+.git/
+tests/
+Red Hat Status_files/
+Red Hat Status.html
+*.pyc
+__pycache__/
+.sisyphus/
+.github/
+CONTRIBUTING.md
+CHANGELOG.md
+DEVELOPMENT.md
+.python-version
