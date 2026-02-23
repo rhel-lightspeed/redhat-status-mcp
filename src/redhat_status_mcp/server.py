@@ -1,8 +1,11 @@
-"""FastMCP tools for Red Hat status information."""
+"""FastMCP tools and prompts for Red Hat status information."""
 
 from datetime import datetime
+from typing import Annotated
 
 from fastmcp import FastMCP
+from mcp.types import ToolAnnotations
+from pydantic import Field
 
 from redhat_status_mcp import api
 
@@ -21,9 +24,22 @@ def _format_status(value: str) -> str:
     return value.replace("_", " ").title() if value else "Unknown"
 
 
-@mcp.tool
+_READONLY_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=True,
+)
+
+
+@mcp.tool(annotations=_READONLY_ANNOTATIONS)
 async def get_overall_status() -> str:
-    """Get the overall Red Hat service status."""
+    """Get the overall Red Hat service status.
+
+    Returns a severity indicator (operational, minor, major, or critical) with a
+    human-readable description. Call this first to decide whether deeper
+    investigation with get_incidents or get_service_group_details is needed.
+    """
     try:
         data = await api.fetch_status()
     except Exception as error:  # pragma: no cover - tested via mocked exception path
@@ -36,9 +52,12 @@ async def get_overall_status() -> str:
     return f"{headline}\nDescription: {description}"
 
 
-@mcp.tool
+@mcp.tool(annotations=_READONLY_ANNOTATIONS)
 async def list_service_groups() -> str:
-    """List service groups and their child service counts."""
+    """List all Red Hat service groups with their current status and child service counts.
+
+    Use this to discover valid group names before calling get_service_group_details.
+    """
     try:
         data = await api.fetch_components()
     except Exception as error:  # pragma: no cover - tested via mocked exception path
@@ -74,9 +93,22 @@ def _find_groups(components: list[dict], query: str) -> list[dict]:
     ]
 
 
-@mcp.tool
-async def get_service_group_details(group_name: str) -> str:
-    """Get details for a single service group and its child services."""
+@mcp.tool(annotations=_READONLY_ANNOTATIONS)
+async def get_service_group_details(
+    group_name: Annotated[
+        str,
+        Field(
+            description="Case-insensitive substring to match against group names "
+            "(e.g. 'console' matches 'console.redhat.com'). "
+            "Call list_service_groups first to discover valid names."
+        ),
+    ],
+) -> str:
+    """Get details for a single service group including its child services and their statuses.
+
+    Accepts partial, case-insensitive group names. If multiple groups match, the
+    matching names are returned so you can refine your query.
+    """
     try:
         data = await api.fetch_components()
     except Exception as error:  # pragma: no cover - tested via mocked exception path
@@ -146,9 +178,13 @@ def _format_timestamp(value: str | None) -> str:
     return timestamp.strftime("%Y-%m-%d %H:%M UTC")
 
 
-@mcp.tool
+@mcp.tool(annotations=_READONLY_ANNOTATIONS)
 async def get_incidents() -> str:
-    """Get unresolved incidents with latest update details."""
+    """Get all currently unresolved Red Hat service incidents.
+
+    Returns each incident's name, severity, status, affected components, and the
+    most recent update. Use this when get_overall_status reports degraded service.
+    """
     try:
         data = await api.fetch_unresolved_incidents()
     except Exception as error:  # pragma: no cover - tested via mocked exception path
@@ -198,9 +234,13 @@ def _format_maintenances(maintenances: list[dict]) -> list[str]:
     return lines
 
 
-@mcp.tool
+@mcp.tool(annotations=_READONLY_ANNOTATIONS)
 async def get_maintenances() -> str:
-    """Get active and upcoming scheduled maintenances."""
+    """Get active and upcoming scheduled maintenances for Red Hat services.
+
+    Returns maintenance windows with their status, time range, and affected
+    components. Use this to check whether an outage is due to planned maintenance.
+    """
     try:
         upcoming_data = await api.fetch_upcoming_maintenances()
         active_data = await api.fetch_active_maintenances()
@@ -217,3 +257,48 @@ async def get_maintenances() -> str:
     lines.append("Upcoming Maintenances:")
     lines.extend(_format_maintenances(upcoming))
     return "\n".join(lines)
+
+
+@mcp.prompt
+def triage_service_issue(
+    service_name: Annotated[
+        str,
+        Field(description="The Red Hat service experiencing issues"),
+    ] = "",
+) -> str:
+    """Triage a Red Hat service issue by checking status, incidents, and maintenances."""
+    base = (
+        "Check the current Red Hat service health:\n"
+        "1. Call get_overall_status to see the overall severity.\n"
+        "2. Call get_incidents to find any active incidents.\n"
+        "3. Call get_maintenances to check for planned maintenance windows.\n"
+    )
+    if service_name:
+        return (
+            f"{base}"
+            f"4. Call get_service_group_details with '{service_name}' to check "
+            "that specific service group.\n"
+            "Summarize whether the issue is a known incident, planned "
+            "maintenance, or potentially unreported."
+        )
+    return (
+        f"{base}"
+        "Summarize the overall health and flag any services that are not fully "
+        "operational."
+    )
+
+
+@mcp.prompt
+def status_report() -> str:
+    """Generate a comprehensive Red Hat service status report."""
+    return (
+        "Generate a Red Hat service status report:\n"
+        "1. Call get_overall_status for the top-level health indicator.\n"
+        "2. Call list_service_groups to get all groups and their statuses.\n"
+        "3. Call get_incidents for any unresolved incidents.\n"
+        "4. Call get_maintenances for active and upcoming maintenance windows.\n"
+        "5. For any service group not showing 'Operational', call "
+        "get_service_group_details to identify the affected child services.\n"
+        "Present the results as a structured status report with sections for "
+        "overall health, incidents, maintenances, and degraded services."
+    )
