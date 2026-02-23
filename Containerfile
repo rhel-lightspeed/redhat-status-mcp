@@ -51,4 +51,12 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
+# Default to streamable-http for networked container deployments.
+# Override with MCP_TRANSPORT=sse or MCP_TRANSPORT=stdio as needed.
+ENV MCP_TRANSPORT=streamable-http
+ENV MCP_HOST=0.0.0.0
+ENV MCP_PORT=8000
+
+EXPOSE 8000
+
 ENTRYPOINT ["redhat-status-mcp"]

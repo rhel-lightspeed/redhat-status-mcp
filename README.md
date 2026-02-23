@@ -28,17 +28,69 @@ This is definitely a work in progress.
 
 ## Quickstart
 
-### Run from container
-
-```sh
-podman run --rm ghcr.io/rhel-lightspeed/redhat-status-mcp:latest
-```
-
-### Run from source
+### Run with stdio (default, for MCP clients like Claude Desktop)
 
 ```sh
 uv sync
 uv run redhat-status-mcp
+```
+
+### Run with HTTP transport (for llama-stack, lightspeed-stack, etc.)
+
+```sh
+uv run redhat-status-mcp --transport streamable-http --port 8000
+```
+
+Or use environment variables:
+
+```sh
+MCP_TRANSPORT=streamable-http MCP_PORT=8000 uv run redhat-status-mcp
+```
+
+SSE transport is also supported:
+
+```sh
+uv run redhat-status-mcp --transport sse --port 8000
+```
+
+### Run from container
+
+The container defaults to streamable-http on `0.0.0.0:8000`:
+
+```sh
+podman run --rm -p 8000:8000 ghcr.io/rhel-lightspeed/redhat-status-mcp:latest
+```
+
+Override transport settings with environment variables:
+
+```sh
+podman run --rm -p 9090:9090 \
+  -e MCP_TRANSPORT=sse \
+  -e MCP_PORT=9090 \
+  ghcr.io/rhel-lightspeed/redhat-status-mcp:latest
+```
+
+## Integration
+
+### llama-stack
+
+Register as a connector in your llama-stack `config.yaml`:
+
+```yaml
+connectors:
+  - connector_type: mcp
+    connector_id: redhat-status
+    url: http://localhost:8000/mcp
+```
+
+### lightspeed-stack
+
+Add to `mcp_servers` in your `lightspeed-stack.yaml`:
+
+```yaml
+mcp_servers:
+  - name: "redhat-status"
+    url: "http://localhost:8000/mcp"
 ```
 
 ## Development
