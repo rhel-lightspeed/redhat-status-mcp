@@ -11,11 +11,16 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: astral-sh/setup-uv@v5
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
 
-      - uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
@@ -23,17 +28,16 @@ jobs:
         run: uv sync
 
       - name: Lint
-        run: uv run ruff check src/ tests/
+        run: make lint
 
       - name: Type check
-        run: uv run ty check src/
+        run: make typecheck
 
-      - name: Complexity gate (hard fail on C+)
-        run: |
-          uv run radon cc src/ -s --min C | grep -q . && echo "FAIL: Cyclomatic complexity C or higher detected" && exit 1 || echo "PASS: All functions rated A or B"
+      - name: Complexity gate
+        run: make radon
 
       - name: Tests + coverage
-        run: uv run pytest -v --cov=redhat_status_mcp --cov-report=term-missing
+        run: make test
 
   build-and-push:
     needs: test
@@ -44,7 +48,11 @@ jobs:
       packages: write
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -53,20 +61,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to Quay.io
-        uses: docker/login-action@v3
-        with:
-          registry: quay.io
-          username: ${{ secrets.QUAY_USERNAME }}
-          password: ${{ secrets.QUAY_PASSWORD }}
-
       - name: Extract metadata
         uses: docker/metadata-action@v5
         id: meta
         with:
-          images: |
-            ghcr.io/${{ github.repository }}
-            quay.io/${{ secrets.QUAY_USERNAME }}/redhat-status-mcp
+          images: ghcr.io/${{ github.repository }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
@@ -81,3 +80,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
