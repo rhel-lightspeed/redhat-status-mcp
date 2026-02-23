@@ -54,9 +54,10 @@ async def get_overall_status() -> str:
 
 @mcp.tool(annotations=_READONLY_ANNOTATIONS)
 async def list_service_groups() -> str:
-    """List all Red Hat service groups with their current status and child service counts.
+    """List all Red Hat service groups with current status and counts.
 
-    Use this to discover valid group names before calling get_service_group_details.
+    Use this to discover valid group names before calling
+    get_service_group_details.
     """
     try:
         data = await api.fetch_components()
@@ -104,10 +105,11 @@ async def get_service_group_details(
         ),
     ],
 ) -> str:
-    """Get details for a single service group including its child services and their statuses.
+    """Get details for a single service group.
 
-    Accepts partial, case-insensitive group names. If multiple groups match, the
-    matching names are returned so you can refine your query.
+    Includes child services and their statuses. Accepts partial,
+    case-insensitive group names. If multiple groups match, the matching
+    names are returned so you can refine your query.
     """
     try:
         data = await api.fetch_components()
@@ -266,7 +268,7 @@ def triage_service_issue(
         Field(description="The Red Hat service experiencing issues"),
     ] = "",
 ) -> str:
-    """Triage a Red Hat service issue by checking status, incidents, and maintenances."""
+    """Triage a service issue via status, incidents, and maintenances."""
     base = (
         "Check the current Red Hat service health:\n"
         "1. Call get_overall_status to see the overall severity.\n"
