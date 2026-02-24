@@ -45,12 +45,15 @@ uv run pytest --cov=redhat_status_mcp --cov-report=term-missing
 
 ```
 src/redhat_status_mcp/
-  __init__.py    # entry point: imports mcp, defines main()
+  __init__.py    # entry point: configures logging, runs mcp via CliApp
+  config.py      # ServerConfig (pydantic-settings): CLI args + MCP_* env vars
   api.py         # httpx client for Statuspage v2 API
   server.py      # FastMCP tools, prompts, and formatting helpers
 tests/
   conftest.py    # shared fixtures (API response payloads)
+  test_config.py # tests for config.py (validation, env vars, CLI, precedence)
   test_api.py    # tests for api.py (httpx mocking)
+  test_main.py   # tests for __init__.py (transport dispatch)
   test_server.py # tests for server.py (tool logic)
 Containerfile    # multi-stage UBI 10 container build
 Makefile         # lint, format, typecheck, radon, test, ci

@@ -1,0 +1,100 @@
+"""Tests for ServerConfig settings loading and validation."""
+
+from unittest.mock import patch
+
+import pytest
+from pydantic import ValidationError
+from pydantic_settings import CliApp
+
+from redhat_status_mcp.config import ServerConfig
+
+
+def test_defaults():
+    """All fields have sensible defaults when no env vars or CLI args are set."""
+    config = ServerConfig()
+
+    assert config.transport == "stdio"
+    assert config.host == "0.0.0.0"
+    assert config.port == 8000
+    assert config.log_level == "INFO"
+    assert config.base_url == "https://status.redhat.com/api/v2"
+
+
+@pytest.mark.parametrize(
+    "transport",
+    ["stdio", "sse", "streamable-http"],
+    ids=["stdio", "sse", "streamable-http"],
+)
+def test_valid_transports(transport: str):
+    """All supported transport values are accepted."""
+    config = ServerConfig(transport=transport)
+
+    assert config.transport == transport
+
+
+def test_invalid_transport_rejected():
+    """Transport values outside the Literal choices raise ValidationError."""
+    with pytest.raises(ValidationError, match="transport"):
+        ServerConfig(transport="websocket")
+
+
+def test_env_var_loading():
+    """Settings are populated from MCP_* environment variables."""
+    with patch.dict(
+        "os.environ",
+        {"MCP_TRANSPORT": "sse", "MCP_HOST": "127.0.0.1", "MCP_PORT": "9090"},
+    ):
+        config = ServerConfig()
+
+    assert config.transport == "sse"
+    assert config.host == "127.0.0.1"
+    assert config.port == 9090
+
+
+def test_env_var_invalid_transport():
+    """Invalid transport from env var raises ValidationError."""
+    with (
+        patch.dict("os.environ", {"MCP_TRANSPORT": "websocket"}),
+        pytest.raises(ValidationError, match="transport"),
+    ):
+        ServerConfig()
+
+
+def test_cli_args_via_cli_app():
+    """CliApp.run parses CLI arguments into ServerConfig."""
+    config = CliApp.run(
+        ServerConfig,
+        cli_args=["--transport", "sse", "--host", "127.0.0.1", "--port", "3000"],
+    )
+
+    assert config.transport == "sse"
+    assert config.host == "127.0.0.1"
+    assert config.port == 3000
+
+
+def test_cli_overrides_env_var():
+    """CLI arguments take precedence over environment variables."""
+    with patch.dict("os.environ", {"MCP_TRANSPORT": "streamable-http"}):
+        config = CliApp.run(
+            ServerConfig,
+            cli_args=["--transport", "sse"],
+        )
+
+    assert config.transport == "sse"
+
+
+def test_env_var_overrides_default():
+    """Environment variables take precedence over field defaults."""
+    with patch.dict("os.environ", {"MCP_PORT": "9999"}):
+        config = ServerConfig()
+
+    assert config.port == 9999
+
+
+def test_port_type_coercion():
+    """Port value from env var string is coerced to int."""
+    with patch.dict("os.environ", {"MCP_PORT": "4000"}):
+        config = ServerConfig()
+
+    assert config.port == 4000
+    assert isinstance(config.port, int)

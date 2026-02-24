@@ -4,14 +4,16 @@ import logging
 
 import httpx
 
-BASE_URL = "https://status.redhat.com/api/v2"
+from redhat_status_mcp.config import ServerConfig
 
 logger = logging.getLogger(__name__)
+
+_config = ServerConfig()
 
 
 async def _fetch_json(path: str) -> dict:
     """Fetch and return JSON content from a Statuspage API path."""
-    url = f"{BASE_URL}/{path}"
+    url = f"{_config.base_url}/{path}"
     logger.debug("Fetching %s", url)
     async with httpx.AsyncClient() as client:
         response = await client.get(url)
