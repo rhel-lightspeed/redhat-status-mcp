@@ -1,6 +1,7 @@
 """Red Hat Status MCP server."""
 
 import argparse
+import logging
 import os
 
 from redhat_status_mcp.server import mcp
@@ -8,6 +9,9 @@ from redhat_status_mcp.server import mcp
 VALID_TRANSPORTS = ("stdio", "sse", "streamable-http")
 DEFAULT_HOST = "0.0.0.0"
 DEFAULT_PORT = 8000
+DEFAULT_LOG_LEVEL = "INFO"
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_args() -> argparse.Namespace:
@@ -39,6 +43,19 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _configure_logging() -> None:
+    """Configure logging from the LOG_LEVEL environment variable.
+
+    Defaults to INFO. Accepts any standard Python log level name
+    (DEBUG, INFO, WARNING, ERROR, CRITICAL).
+    """
+    level = os.environ.get("LOG_LEVEL", DEFAULT_LOG_LEVEL).upper()
+    logging.basicConfig(
+        level=level,
+        format="%(levelname)s - %(name)s - %(message)s",
+    )
+
+
 def main() -> None:
     """Run the MCP server with configurable transport.
 
@@ -47,13 +64,18 @@ def main() -> None:
         --host / MCP_HOST: Host to bind to (HTTP transports only)
         --port / MCP_PORT: Port to bind to (HTTP transports only)
 
+    Log level can be set via LOG_LEVEL environment variable (default: INFO).
+
     CLI arguments take precedence over environment variables.
     """
+    _configure_logging()
     args = _parse_args()
 
     transport = args.transport or os.environ.get("MCP_TRANSPORT", "stdio")
     host = args.host or os.environ.get("MCP_HOST", DEFAULT_HOST)
     port = args.port or int(os.environ.get("MCP_PORT", str(DEFAULT_PORT)))
+
+    logger.info("Starting MCP server with transport=%s", transport)
 
     if transport == "sse":
         mcp.run(transport="sse", host=host, port=port)

@@ -1,5 +1,6 @@
 """FastMCP tools and prompts for Red Hat status information."""
 
+import logging
 from datetime import datetime
 from typing import Annotated
 
@@ -10,6 +11,8 @@ from pydantic import Field
 from redhat_status_mcp import api
 
 mcp = FastMCP("Red Hat Status")
+
+logger = logging.getLogger(__name__)
 
 _INDICATOR_LABELS = {
     "none": "✅ All Systems Operational",
@@ -43,10 +46,12 @@ async def get_overall_status() -> str:
     try:
         data = await api.fetch_status()
     except Exception as error:  # pragma: no cover - tested via mocked exception path
+        logger.exception("Failed to fetch overall status")
         return f"Error fetching status: {error}"
 
     status = data.get("status", {})
     indicator = str(status.get("indicator", "none")).lower()
+    logger.info("Overall status indicator: %s", indicator)
     description = status.get("description", "No status description available")
     headline = _INDICATOR_LABELS.get(indicator, f"Status indicator: {indicator}")
     return f"{headline}\nDescription: {description}"
@@ -62,12 +67,15 @@ async def list_service_groups() -> str:
     try:
         data = await api.fetch_components()
     except Exception as error:  # pragma: no cover - tested via mocked exception path
+        logger.exception("Failed to fetch service groups")
         return f"Error fetching service groups: {error}"
 
     components = data.get("components", [])
     groups = [component for component in components if component.get("group")]
     if not groups:
         return "No service groups found."
+
+    logger.info("Found %d service groups", len(groups))
 
     lines = ["Service Groups:"]
     for group in sorted(groups, key=lambda item: str(item.get("name", "")).casefold()):
@@ -114,10 +122,12 @@ async def get_service_group_details(
     try:
         data = await api.fetch_components()
     except Exception as error:  # pragma: no cover - tested via mocked exception path
+        logger.exception("Failed to fetch service group details")
         return f"Error fetching service group details: {error}"
 
     components = data.get("components", [])
     matches = _find_groups(components, group_name)
+    logger.info("Group query '%s' matched %d result(s)", group_name, len(matches))
     if not matches:
         return (
             f"No service group found matching '{group_name}'. "
@@ -190,11 +200,14 @@ async def get_incidents() -> str:
     try:
         data = await api.fetch_unresolved_incidents()
     except Exception as error:  # pragma: no cover - tested via mocked exception path
+        logger.exception("Failed to fetch incidents")
         return f"Error fetching incidents: {error}"
 
     incidents = data.get("incidents", [])
     if not incidents:
         return "No unresolved incidents at this time."
+
+    logger.info("Found %d unresolved incident(s)", len(incidents))
 
     lines = ["Unresolved Incidents:"]
     for incident in incidents:
@@ -247,10 +260,16 @@ async def get_maintenances() -> str:
         upcoming_data = await api.fetch_upcoming_maintenances()
         active_data = await api.fetch_active_maintenances()
     except Exception as error:  # pragma: no cover - tested via mocked exception path
+        logger.exception("Failed to fetch maintenances")
         return f"Error fetching maintenances: {error}"
 
     upcoming = upcoming_data.get("scheduled_maintenances", [])
     active = active_data.get("scheduled_maintenances", [])
+    logger.info(
+        "Found %d active and %d upcoming maintenance(s)",
+        len(active),
+        len(upcoming),
+    )
     if not active and not upcoming:
         return "No scheduled maintenances at this time."
 

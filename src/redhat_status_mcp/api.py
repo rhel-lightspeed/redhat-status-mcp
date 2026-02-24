@@ -1,14 +1,20 @@
 """Red Hat Statuspage public API client."""
 
+import logging
+
 import httpx
 
 BASE_URL = "https://status.redhat.com/api/v2"
 
+logger = logging.getLogger(__name__)
+
 
 async def _fetch_json(path: str) -> dict:
     """Fetch and return JSON content from a Statuspage API path."""
+    url = f"{BASE_URL}/{path}"
+    logger.debug("Fetching %s", url)
     async with httpx.AsyncClient() as client:
-        response = await client.get(f"{BASE_URL}/{path}")
+        response = await client.get(url)
         response.raise_for_status()
         return response.json()
 
