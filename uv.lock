@@ -899,7 +899,7 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "pytest-cov", specifier = ">=7.0.0" },
     { name = "pytest-randomly", specifier = ">=3.15" },
-    { name = "radon", specifier = ">=6.0" },
+    { name = "radon", specifier = ">=6.0.1" },
     { name = "ruff", specifier = ">=0.9" },
     { name = "ty", specifier = ">=0.0.1a14" },
 ]
