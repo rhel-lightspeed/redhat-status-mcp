@@ -640,6 +640,7 @@ spec:
           value:
             - $(params.additional-tags[*])
             - $(params.tag-prefix)$(tasks.clone-repository.results.short-commit)
+            - $(params.tag-prefix)$(tasks.get-version.results.version)
 
       runAfter:
         - build-image-index

@@ -61,6 +61,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Create dev tag
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "DEV_TAG=dev-$(date +%Y%m%d)-$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+
       - name: Extract metadata
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         id: meta
@@ -71,6 +76,8 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
+            type=raw,value=${{ env.DEV_TAG }},enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=dev-latest,enable=${{ github.ref == 'refs/heads/main' }}
 
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -80,5 +87,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PSEUDO_VERSION=${{ env.DEV_TAG || github.ref_name }}
+            VERSION=${{ env.DEV_TAG || github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
