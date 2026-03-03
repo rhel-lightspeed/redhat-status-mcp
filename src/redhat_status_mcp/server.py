@@ -1,16 +1,35 @@
 """FastMCP tools and prompts for Red Hat status information."""
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated
 
+import httpx
 from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
 from redhat_status_mcp import api
+from redhat_status_mcp.config import ServerConfig
 
-mcp = FastMCP("Red Hat Status")
+
+@asynccontextmanager
+async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
+    """Manage shared resources for the lifetime of the MCP server."""
+    config = ServerConfig()
+    limits = httpx.Limits(max_connections=config.max_connections)
+    timeout = httpx.Timeout(config.request_timeout)
+    client = httpx.AsyncClient(limits=limits, timeout=timeout)
+    api.set_client(client)
+    try:
+        yield {}
+    finally:
+        await api.close_client()
+
+
+mcp = FastMCP("Red Hat Status", lifespan=app_lifespan)
 
 logger = logging.getLogger(__name__)
 

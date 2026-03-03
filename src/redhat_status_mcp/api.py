@@ -10,15 +10,38 @@ logger = logging.getLogger(__name__)
 
 _config = ServerConfig()
 
+_client: httpx.AsyncClient | None = None
+
+
+def set_client(client: httpx.AsyncClient) -> None:
+    """Set the shared HTTP client for all API requests."""
+    global _client
+    _client = client
+
+
+def get_client() -> httpx.AsyncClient:
+    """Return the shared HTTP client, raising RuntimeError if not initialized."""
+    if _client is None:
+        raise RuntimeError("HTTP client not initialized. Call set_client() first.")
+    return _client
+
+
+async def close_client() -> None:
+    """Close and reset the shared HTTP client."""
+    global _client
+    if _client is not None:
+        await _client.aclose()
+        _client = None
+
 
 async def _fetch_json(path: str) -> dict:
     """Fetch and return JSON content from a Statuspage API path."""
     url = f"{_config.base_url}/{path}"
     logger.info("Fetching %s", url)
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return response.json()
+    client = get_client()
+    response = await client.get(url)
+    response.raise_for_status()
+    return response.json()
 
 
 async def fetch_status() -> dict:

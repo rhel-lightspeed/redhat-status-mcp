@@ -1,7 +1,7 @@
 """Tests for the Red Hat Statuspage API client."""
 
 import importlib
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -9,13 +9,12 @@ import pytest
 api = importlib.import_module("redhat_status_mcp.api")
 
 
-def _mock_async_client_with_response(response: MagicMock) -> AsyncMock:
-    """Build an AsyncClient mock usable as an async context manager."""
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-    mock_client.get = AsyncMock(return_value=response)
-    return mock_client
+@pytest.fixture(autouse=True)
+def _reset_client():
+    """Reset shared client before and after each test."""
+    api._client = None
+    yield
+    api._client = None
 
 
 async def test_fetch_status_returns_parsed_json() -> None:
@@ -27,106 +26,103 @@ async def test_fetch_status_returns_parsed_json() -> None:
     mock_response.json.return_value = payload
     mock_response.raise_for_status = MagicMock()
 
-    with patch("httpx.AsyncClient") as mock_client_class:
-        mock_client = _mock_async_client_with_response(mock_response)
-        mock_client_class.return_value = mock_client
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    api.set_client(mock_client)
 
-        result = await api.fetch_status()
-
+    result = await api.fetch_status()
     assert result == payload
 
 
 async def test_fetch_components_returns_parsed_json(components_response: dict) -> None:
+    """Successful fetch returns the parsed components payload."""
     mock_response = MagicMock()
     mock_response.json.return_value = components_response
     mock_response.raise_for_status = MagicMock()
 
-    with patch("httpx.AsyncClient") as mock_client_class:
-        mock_client = _mock_async_client_with_response(mock_response)
-        mock_client_class.return_value = mock_client
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    api.set_client(mock_client)
 
-        result = await api.fetch_components()
-
+    result = await api.fetch_components()
     assert result == components_response
 
 
 async def test_fetch_unresolved_incidents_returns_parsed_json(
     incidents_response: dict,
 ) -> None:
+    """Successful fetch returns the parsed incidents payload."""
     mock_response = MagicMock()
     mock_response.json.return_value = incidents_response
     mock_response.raise_for_status = MagicMock()
 
-    with patch("httpx.AsyncClient") as mock_client_class:
-        mock_client = _mock_async_client_with_response(mock_response)
-        mock_client_class.return_value = mock_client
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    api.set_client(mock_client)
 
-        result = await api.fetch_unresolved_incidents()
-
+    result = await api.fetch_unresolved_incidents()
     assert result == incidents_response
 
 
 async def test_fetch_upcoming_maintenances_returns_parsed_json(
     maintenances_upcoming: dict,
 ) -> None:
+    """Successful fetch returns the parsed upcoming maintenances payload."""
     mock_response = MagicMock()
     mock_response.json.return_value = maintenances_upcoming
     mock_response.raise_for_status = MagicMock()
 
-    with patch("httpx.AsyncClient") as mock_client_class:
-        mock_client = _mock_async_client_with_response(mock_response)
-        mock_client_class.return_value = mock_client
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    api.set_client(mock_client)
 
-        result = await api.fetch_upcoming_maintenances()
-
+    result = await api.fetch_upcoming_maintenances()
     assert result == maintenances_upcoming
 
 
 async def test_fetch_active_maintenances_returns_parsed_json(
     maintenances_active: dict,
 ) -> None:
+    """Successful fetch returns the parsed active maintenances payload."""
     mock_response = MagicMock()
     mock_response.json.return_value = maintenances_active
     mock_response.raise_for_status = MagicMock()
 
-    with patch("httpx.AsyncClient") as mock_client_class:
-        mock_client = _mock_async_client_with_response(mock_response)
-        mock_client_class.return_value = mock_client
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    api.set_client(mock_client)
 
-        result = await api.fetch_active_maintenances()
-
+    result = await api.fetch_active_maintenances()
     assert result == maintenances_active
 
 
 async def test_fetch_status_http_error() -> None:
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-
+    """HTTPStatusError from the API propagates to the caller."""
     request = httpx.Request("GET", "https://status.redhat.com/api/v2/status.json")
     response = httpx.Response(status_code=503, request=request)
     error = httpx.HTTPStatusError(
         "Service unavailable", request=request, response=response
     )
-    mock_client.get = AsyncMock(side_effect=error)
 
-    with patch("httpx.AsyncClient", return_value=mock_client):
-        with pytest.raises(httpx.HTTPStatusError):
-            await api.fetch_status()
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=error)
+    api.set_client(mock_client)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await api.fetch_status()
 
 
 async def test_fetch_status_connect_error() -> None:
-    mock_client = AsyncMock()
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-
+    """ConnectError from the API propagates to the caller."""
     request = httpx.Request("GET", "https://status.redhat.com/api/v2/status.json")
     error = httpx.ConnectError("Connection failed", request=request)
-    mock_client.get = AsyncMock(side_effect=error)
 
-    with patch("httpx.AsyncClient", return_value=mock_client):
-        with pytest.raises(httpx.ConnectError):
-            await api.fetch_status()
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=error)
+    api.set_client(mock_client)
+
+    with pytest.raises(httpx.ConnectError):
+        await api.fetch_status()
 
 
 async def test_fetch_status_uses_expected_endpoint() -> None:
@@ -136,12 +132,35 @@ async def test_fetch_status_uses_expected_endpoint() -> None:
     mock_response.json.return_value = payload
     mock_response.raise_for_status = MagicMock()
 
-    with patch("httpx.AsyncClient") as mock_client_class:
-        mock_client = _mock_async_client_with_response(mock_response)
-        mock_client_class.return_value = mock_client
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    api.set_client(mock_client)
 
-        await api.fetch_status()
+    await api.fetch_status()
 
     mock_client.get.assert_awaited_once_with(
         "https://status.redhat.com/api/v2/status.json"
     )
+
+
+async def test_get_client_raises_without_initialization() -> None:
+    """get_client raises RuntimeError when no client has been set."""
+    with pytest.raises(RuntimeError, match="HTTP client not initialized"):
+        api.get_client()
+
+
+async def test_close_client_resets_to_none() -> None:
+    """close_client closes the client and resets the module-level reference."""
+    mock_client = AsyncMock()
+    api.set_client(mock_client)
+
+    await api.close_client()
+
+    assert api._client is None
+    mock_client.aclose.assert_awaited_once()
+
+
+async def test_close_client_noop_when_none() -> None:
+    """close_client is a no-op when no client is set."""
+    await api.close_client()
+    assert api._client is None
