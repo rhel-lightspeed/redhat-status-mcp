@@ -7,6 +7,8 @@
   ],
   "labels": ["dependencies"],
   "dependencyDashboard": true,
+  "prHourlyLimit": 0,
+  "prConcurrentLimit": 0,
   "minimumReleaseAge": "7 days",
   "vulnerabilityAlerts": {
     "labels": ["security"],
@@ -26,6 +28,12 @@
       "description": "Disable Python version updates",
       "matchDatasources": ["python-version"],
       "enabled": false
+    },
+    {
+      "description": "Auto-merge safe non-major dependency updates",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
+      "automerge": true,
+      "automergeType": "pr"
     }
   ]
 }
