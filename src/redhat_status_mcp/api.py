@@ -14,7 +14,7 @@ _config = ServerConfig()
 async def _fetch_json(path: str) -> dict:
     """Fetch and return JSON content from a Statuspage API path."""
     url = f"{_config.base_url}/{path}"
-    logger.debug("Fetching %s", url)
+    logger.info("Fetching %s", url)
     async with httpx.AsyncClient() as client:
         response = await client.get(url)
         response.raise_for_status()

@@ -43,6 +43,7 @@ async def get_overall_status() -> str:
     human-readable description. Call this first to decide whether deeper
     investigation with get_incidents or get_service_group_details is needed.
     """
+    logger.info("Tool called: get_overall_status")
     try:
         data = await api.fetch_status()
     except Exception as error:  # pragma: no cover - tested via mocked exception path
@@ -64,6 +65,7 @@ async def list_service_groups() -> str:
     Use this to discover valid group names before calling
     get_service_group_details.
     """
+    logger.info("Tool called: list_service_groups")
     try:
         data = await api.fetch_components()
     except Exception as error:  # pragma: no cover - tested via mocked exception path
@@ -119,6 +121,7 @@ async def get_service_group_details(
     case-insensitive group names. If multiple groups match, the matching
     names are returned so you can refine your query.
     """
+    logger.info("Tool called: get_service_group_details (group_name=%r)", group_name)
     try:
         data = await api.fetch_components()
     except Exception as error:  # pragma: no cover - tested via mocked exception path
@@ -197,6 +200,7 @@ async def get_incidents() -> str:
     Returns each incident's name, severity, status, affected components, and the
     most recent update. Use this when get_overall_status reports degraded service.
     """
+    logger.info("Tool called: get_incidents")
     try:
         data = await api.fetch_unresolved_incidents()
     except Exception as error:  # pragma: no cover - tested via mocked exception path
@@ -256,6 +260,7 @@ async def get_maintenances() -> str:
     Returns maintenance windows with their status, time range, and affected
     components. Use this to check whether an outage is due to planned maintenance.
     """
+    logger.info("Tool called: get_maintenances")
     try:
         upcoming_data = await api.fetch_upcoming_maintenances()
         active_data = await api.fetch_active_maintenances()
@@ -288,6 +293,7 @@ def triage_service_issue(
     ] = "",
 ) -> str:
     """Triage a service issue via status, incidents, and maintenances."""
+    logger.info("Prompt called: triage_service_issue (service_name=%r)", service_name)
     base = (
         "Check the current Red Hat service health:\n"
         "1. Call get_overall_status to see the overall severity.\n"
@@ -312,6 +318,7 @@ def triage_service_issue(
 @mcp.prompt
 def status_report() -> str:
     """Generate a comprehensive Red Hat service status report."""
+    logger.info("Prompt called: status_report")
     return (
         "Generate a Red Hat service status report:\n"
         "1. Call get_overall_status for the top-level health indicator.\n"
