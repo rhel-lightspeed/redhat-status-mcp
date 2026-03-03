@@ -24,7 +24,7 @@ RUN uv pip install . --no-deps && \
     sed -i 's|^#!.*python.*|#!/app/.venv/bin/python3|' /build/.venv/bin/redhat-status-mcp
 
 # Stage 2: Runtime — minimal UBI 10 Python 3.12 image
-FROM registry.access.redhat.com/ubi10/python-312-minimal:latest@sha256:1cce9e5cea5dc250f2d8327f27580cf31d6a5430304928bff37be84391f4ec61
+FROM registry.access.redhat.com/ubi10/python-312-minimal:latest@sha256:2410ba7ba1de5aabbed098e054aa3ee5f3f21ae461ad3fa01147d34970df1a3e
 
 ARG PSEUDO_VERSION=0.1.0a
 ARG VERSION=0.1.0a
