@@ -4,7 +4,7 @@ import logging
 
 import httpx
 from tenacity import (
-    before_sleep_log,
+    RetryCallState,
     retry,
     retry_if_exception,
     stop_after_attempt,
@@ -41,6 +41,15 @@ async def close_client() -> None:
         _client = None
 
 
+def _log_before_sleep(retry_state: RetryCallState) -> None:
+    """Log a warning before each retry sleep."""
+    logger.warning(
+        "Retrying after attempt %d due to: %s",
+        retry_state.attempt_number,
+        retry_state.outcome.exception() if retry_state.outcome else "unknown error",
+    )
+
+
 def _is_retryable(exc: BaseException) -> bool:
     """Return True if the exception warrants a retry attempt."""
     if isinstance(exc, httpx.HTTPStatusError):
@@ -52,7 +61,7 @@ def _is_retryable(exc: BaseException) -> bool:
     retry=retry_if_exception(_is_retryable),
     stop=stop_after_attempt(_config.max_retries + 1),
     wait=wait_exponential(multiplier=1, min=0.5, max=10),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
+    before_sleep=_log_before_sleep,
     reraise=True,
 )
 async def _fetch_json(path: str) -> dict:

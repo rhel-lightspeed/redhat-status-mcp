@@ -44,13 +44,15 @@ async def _cached_fetch(
     fetcher: Callable[[], Awaitable[dict]],
 ) -> dict:
     """Fetch data from cache or API, storing successful responses in cache."""
-    cache: TTLCache = ctx.request_context.lifespan_context["cache"]
-    cache_lock: asyncio.Lock = ctx.request_context.lifespan_context["cache_lock"]
+    request_context = ctx.request_context
+    assert request_context is not None, "request_context must be set"
+    cache: TTLCache = request_context.lifespan_context["cache"]
+    cache_lock: asyncio.Lock = request_context.lifespan_context["cache_lock"]
 
     async with cache_lock:
         if cache_key in cache:
             logger.debug("Cache hit for key: %s", cache_key)
-            return cache[cache_key]  # type: ignore[return-value]
+            return cache[cache_key]
 
     # Cache miss — fetch outside the lock
     logger.debug("Cache miss for key: %s", cache_key)
