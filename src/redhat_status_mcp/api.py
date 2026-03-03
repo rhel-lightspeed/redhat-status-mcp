@@ -3,6 +3,13 @@
 import logging
 
 import httpx
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from redhat_status_mcp.config import ServerConfig
 
@@ -34,6 +41,20 @@ async def close_client() -> None:
         _client = None
 
 
+def _is_retryable(exc: BaseException) -> bool:
+    """Return True if the exception warrants a retry attempt."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return isinstance(exc, (httpx.ConnectError, httpx.TimeoutException))
+
+
+@retry(
+    retry=retry_if_exception(_is_retryable),
+    stop=stop_after_attempt(_config.max_retries + 1),
+    wait=wait_exponential(multiplier=1, min=0.5, max=10),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True,
+)
 async def _fetch_json(path: str) -> dict:
     """Fetch and return JSON content from a Statuspage API path."""
     url = f"{_config.base_url}/{path}"
