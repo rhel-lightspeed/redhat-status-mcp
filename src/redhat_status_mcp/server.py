@@ -1,13 +1,15 @@
 """FastMCP tools and prompts for Red Hat status information."""
 
+import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Annotated
 
 import httpx
-from fastmcp import FastMCP
+from cachetools import TTLCache
+from fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 
@@ -23,8 +25,10 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     timeout = httpx.Timeout(config.request_timeout)
     client = httpx.AsyncClient(limits=limits, timeout=timeout)
     api.set_client(client)
+    cache: TTLCache = TTLCache(maxsize=64, ttl=config.cache_ttl)
+    cache_lock = asyncio.Lock()
     try:
-        yield {}
+        yield {"cache": cache, "cache_lock": cache_lock}
     finally:
         await api.close_client()
 
@@ -32,6 +36,31 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
 mcp = FastMCP("Red Hat Status", lifespan=app_lifespan)
 
 logger = logging.getLogger(__name__)
+
+
+async def _cached_fetch(
+    ctx: Context,
+    cache_key: str,
+    fetcher: Callable[[], Awaitable[dict]],
+) -> dict:
+    """Fetch data from cache or API, storing successful responses in cache."""
+    cache: TTLCache = ctx.request_context.lifespan_context["cache"]
+    cache_lock: asyncio.Lock = ctx.request_context.lifespan_context["cache_lock"]
+
+    async with cache_lock:
+        if cache_key in cache:
+            logger.debug("Cache hit for key: %s", cache_key)
+            return cache[cache_key]  # type: ignore[return-value]
+
+    # Cache miss — fetch outside the lock
+    logger.debug("Cache miss for key: %s", cache_key)
+    result = await fetcher()
+
+    async with cache_lock:
+        cache[cache_key] = result
+
+    return result
+
 
 _INDICATOR_LABELS = {
     "none": "✅ All Systems Operational",
@@ -55,7 +84,7 @@ _READONLY_ANNOTATIONS = ToolAnnotations(
 
 
 @mcp.tool(annotations=_READONLY_ANNOTATIONS)
-async def get_overall_status() -> str:
+async def get_overall_status(ctx: Context) -> str:
     """Get the overall Red Hat service status.
 
     Returns a severity indicator (operational, minor, major, or critical) with a
@@ -64,7 +93,7 @@ async def get_overall_status() -> str:
     """
     logger.info("Tool called: get_overall_status")
     try:
-        data = await api.fetch_status()
+        data = await _cached_fetch(ctx, "status", api.fetch_status)
     except Exception as error:  # pragma: no cover - tested via mocked exception path
         logger.exception("Failed to fetch overall status")
         return f"Error fetching status: {error}"
@@ -78,7 +107,7 @@ async def get_overall_status() -> str:
 
 
 @mcp.tool(annotations=_READONLY_ANNOTATIONS)
-async def list_service_groups() -> str:
+async def list_service_groups(ctx: Context) -> str:
     """List all Red Hat service groups with current status and counts.
 
     Use this to discover valid group names before calling
@@ -86,7 +115,7 @@ async def list_service_groups() -> str:
     """
     logger.info("Tool called: list_service_groups")
     try:
-        data = await api.fetch_components()
+        data = await _cached_fetch(ctx, "components", api.fetch_components)
     except Exception as error:  # pragma: no cover - tested via mocked exception path
         logger.exception("Failed to fetch service groups")
         return f"Error fetching service groups: {error}"
@@ -125,6 +154,7 @@ def _find_groups(components: list[dict], query: str) -> list[dict]:
 
 @mcp.tool(annotations=_READONLY_ANNOTATIONS)
 async def get_service_group_details(
+    ctx: Context,
     group_name: Annotated[
         str,
         Field(
@@ -142,7 +172,7 @@ async def get_service_group_details(
     """
     logger.info("Tool called: get_service_group_details (group_name=%r)", group_name)
     try:
-        data = await api.fetch_components()
+        data = await _cached_fetch(ctx, "components", api.fetch_components)
     except Exception as error:  # pragma: no cover - tested via mocked exception path
         logger.exception("Failed to fetch service group details")
         return f"Error fetching service group details: {error}"
@@ -213,7 +243,7 @@ def _format_timestamp(value: str | None) -> str:
 
 
 @mcp.tool(annotations=_READONLY_ANNOTATIONS)
-async def get_incidents() -> str:
+async def get_incidents(ctx: Context) -> str:
     """Get all currently unresolved Red Hat service incidents.
 
     Returns each incident's name, severity, status, affected components, and the
@@ -221,7 +251,7 @@ async def get_incidents() -> str:
     """
     logger.info("Tool called: get_incidents")
     try:
-        data = await api.fetch_unresolved_incidents()
+        data = await _cached_fetch(ctx, "incidents", api.fetch_unresolved_incidents)
     except Exception as error:  # pragma: no cover - tested via mocked exception path
         logger.exception("Failed to fetch incidents")
         return f"Error fetching incidents: {error}"
@@ -273,7 +303,7 @@ def _format_maintenances(maintenances: list[dict]) -> list[str]:
 
 
 @mcp.tool(annotations=_READONLY_ANNOTATIONS)
-async def get_maintenances() -> str:
+async def get_maintenances(ctx: Context) -> str:
     """Get active and upcoming scheduled maintenances for Red Hat services.
 
     Returns maintenance windows with their status, time range, and affected
@@ -281,8 +311,12 @@ async def get_maintenances() -> str:
     """
     logger.info("Tool called: get_maintenances")
     try:
-        upcoming_data = await api.fetch_upcoming_maintenances()
-        active_data = await api.fetch_active_maintenances()
+        upcoming_data = await _cached_fetch(
+            ctx, "upcoming_maintenances", api.fetch_upcoming_maintenances
+        )
+        active_data = await _cached_fetch(
+            ctx, "active_maintenances", api.fetch_active_maintenances
+        )
     except Exception as error:  # pragma: no cover - tested via mocked exception path
         logger.exception("Failed to fetch maintenances")
         return f"Error fetching maintenances: {error}"
