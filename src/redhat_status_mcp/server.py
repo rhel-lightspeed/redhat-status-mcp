@@ -311,11 +311,11 @@ async def get_maintenances(ctx: Context) -> str:
     """
     logger.info("Tool called: get_maintenances")
     try:
-        upcoming_data = await _cached_fetch(
-            ctx, "upcoming_maintenances", api.fetch_upcoming_maintenances
-        )
-        active_data = await _cached_fetch(
-            ctx, "active_maintenances", api.fetch_active_maintenances
+        upcoming_data, active_data = await asyncio.gather(
+            _cached_fetch(
+                ctx, "upcoming_maintenances", api.fetch_upcoming_maintenances
+            ),
+            _cached_fetch(ctx, "active_maintenances", api.fetch_active_maintenances),
         )
     except Exception as error:  # pragma: no cover - tested via mocked exception path
         logger.exception("Failed to fetch maintenances")
