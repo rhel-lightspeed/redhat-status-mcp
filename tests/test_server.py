@@ -1,10 +1,12 @@
 """Tests for FastMCP server tools."""
 
+import asyncio
 import importlib
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
+from cachetools import TTLCache
 
 server = importlib.import_module("redhat_status_mcp.server")
 get_overall_status = server.get_overall_status
@@ -14,6 +16,19 @@ get_incidents = server.get_incidents
 get_maintenances = server.get_maintenances
 triage_service_issue = server.triage_service_issue
 status_report = server.status_report
+
+
+@pytest.fixture
+def _mock_ctx():
+    """Provide a mock Context with lifespan_context containing cache and lock."""
+    cache = TTLCache(maxsize=64, ttl=60)
+    cache_lock = asyncio.Lock()
+    ctx = MagicMock()
+    ctx.request_context.lifespan_context = {
+        "cache": cache,
+        "cache_lock": cache_lock,
+    }
+    return ctx
 
 
 @pytest.fixture
@@ -71,31 +86,34 @@ async def test_get_overall_status_indicator_mapping(
     indicator: str,
     description: str,
     icon: str,
+    _mock_ctx: MagicMock,
     _mock_fetch_status: AsyncMock,
 ) -> None:
     """Each severity indicator maps to the correct icon and label."""
     _mock_fetch_status.return_value = {
         "status": {"indicator": indicator, "description": description}
     }
-    result = await get_overall_status()
+    result = await get_overall_status(_mock_ctx)
 
     assert description in result
     assert icon in result
 
 
 async def test_get_overall_status_unknown_indicator(
+    _mock_ctx: MagicMock,
     _mock_fetch_status: AsyncMock,
 ) -> None:
     """Unknown indicator values fall through gracefully."""
     _mock_fetch_status.return_value = {
         "status": {"indicator": "weird", "description": "Custom Provider Message"}
     }
-    result = await get_overall_status()
+    result = await get_overall_status(_mock_ctx)
 
     assert "Custom Provider Message" in result
 
 
 async def test_get_overall_status_api_error(
+    _mock_ctx: MagicMock,
     _mock_fetch_status: AsyncMock,
 ) -> None:
     """API connection failures are surfaced in the response."""
@@ -103,7 +121,7 @@ async def test_get_overall_status_api_error(
     _mock_fetch_status.side_effect = httpx.ConnectError(
         "Connection failed", request=request
     )
-    result = await get_overall_status()
+    result = await get_overall_status(_mock_ctx)
 
     assert "Error fetching status" in result
     assert "Connection failed" in result
@@ -111,11 +129,12 @@ async def test_get_overall_status_api_error(
 
 async def test_list_service_groups_returns_groups_sorted_with_counts(
     components_response: dict,
+    _mock_ctx: MagicMock,
     _mock_fetch_components: AsyncMock,
 ) -> None:
     """Groups are listed alphabetically with correct child counts."""
     _mock_fetch_components.return_value = components_response
-    result = await list_service_groups()
+    result = await list_service_groups(_mock_ctx)
 
     lines = result.splitlines()
     bullet_lines = [line for line in lines if line.startswith("- ")]
@@ -127,32 +146,35 @@ async def test_list_service_groups_returns_groups_sorted_with_counts(
 
 async def test_list_service_groups_ignores_non_group_components(
     components_response: dict,
+    _mock_ctx: MagicMock,
     _mock_fetch_components: AsyncMock,
 ) -> None:
     """Child components are excluded from the group listing."""
     _mock_fetch_components.return_value = components_response
-    result = await list_service_groups()
+    result = await list_service_groups(_mock_ctx)
 
     assert "Ansible Automation Platform - Automation Hub" not in result
     assert "registry.redhat.io" not in result
 
 
 async def test_list_service_groups_empty_components(
+    _mock_ctx: MagicMock,
     _mock_fetch_components: AsyncMock,
 ) -> None:
     """Empty component list returns a friendly message."""
     _mock_fetch_components.return_value = {"components": []}
-    result = await list_service_groups()
+    result = await list_service_groups(_mock_ctx)
 
     assert "No service groups" in result
 
 
 async def test_list_service_groups_api_error(
+    _mock_ctx: MagicMock,
     _mock_fetch_components: AsyncMock,
 ) -> None:
     """API errors are surfaced in the response."""
     _mock_fetch_components.side_effect = RuntimeError("components endpoint down")
-    result = await list_service_groups()
+    result = await list_service_groups(_mock_ctx)
 
     assert "Error fetching service groups" in result
     assert "components endpoint down" in result
@@ -170,11 +192,12 @@ async def test_list_service_groups_api_error(
 async def test_get_service_group_details_successful_match(
     query: str,
     components_response: dict,
+    _mock_ctx: MagicMock,
     _mock_fetch_components: AsyncMock,
 ) -> None:
     """Exact, case-insensitive, and partial queries all resolve to the correct group."""
     _mock_fetch_components.return_value = components_response
-    result = await get_service_group_details(query)
+    result = await get_service_group_details(_mock_ctx, query)
 
     assert "Group: console.redhat.com" in result
     assert "Ansible Automation Platform - Automation Hub" in result
@@ -183,11 +206,12 @@ async def test_get_service_group_details_successful_match(
 
 async def test_get_service_group_details_no_match(
     components_response: dict,
+    _mock_ctx: MagicMock,
     _mock_fetch_components: AsyncMock,
 ) -> None:
     """Unmatched query suggests using list_service_groups."""
     _mock_fetch_components.return_value = components_response
-    result = await get_service_group_details("satellite")
+    result = await get_service_group_details(_mock_ctx, "satellite")
 
     assert "No service group found" in result
     assert "list_service_groups" in result
@@ -195,11 +219,12 @@ async def test_get_service_group_details_no_match(
 
 async def test_get_service_group_details_multiple_matches(
     components_response: dict,
+    _mock_ctx: MagicMock,
     _mock_fetch_components: AsyncMock,
 ) -> None:
     """Ambiguous query returns all matching group names."""
     _mock_fetch_components.return_value = components_response
-    result = await get_service_group_details("redhat.com")
+    result = await get_service_group_details(_mock_ctx, "redhat.com")
 
     assert "Multiple service groups matched" in result
     assert "console.redhat.com" in result
@@ -209,22 +234,24 @@ async def test_get_service_group_details_multiple_matches(
 
 async def test_get_service_group_details_lists_child_statuses(
     components_response: dict,
+    _mock_ctx: MagicMock,
     _mock_fetch_components: AsyncMock,
 ) -> None:
     """Child service statuses are formatted and included."""
     _mock_fetch_components.return_value = components_response
-    result = await get_service_group_details("console")
+    result = await get_service_group_details(_mock_ctx, "console")
 
     assert "Degraded Performance" in result
     assert "Partial Outage" in result
 
 
 async def test_get_service_group_details_api_error(
+    _mock_ctx: MagicMock,
     _mock_fetch_components: AsyncMock,
 ) -> None:
     """API errors are surfaced in the response."""
     _mock_fetch_components.side_effect = RuntimeError("components timeout")
-    result = await get_service_group_details("console")
+    result = await get_service_group_details(_mock_ctx, "console")
 
     assert "Error fetching service group details" in result
     assert "components timeout" in result
@@ -232,22 +259,24 @@ async def test_get_service_group_details_api_error(
 
 async def test_get_incidents_empty(
     incidents_empty: dict,
+    _mock_ctx: MagicMock,
     _mock_fetch_incidents: AsyncMock,
 ) -> None:
     """No incidents returns a friendly message."""
     _mock_fetch_incidents.return_value = incidents_empty
-    result = await get_incidents()
+    result = await get_incidents(_mock_ctx)
 
     assert "No unresolved incidents" in result
 
 
 async def test_get_incidents_active_incident_format(
     incidents_response: dict,
+    _mock_ctx: MagicMock,
     _mock_fetch_incidents: AsyncMock,
 ) -> None:
     """Active incidents include name, impact, status, and affected components."""
     _mock_fetch_incidents.return_value = incidents_response
-    result = await get_incidents()
+    result = await get_incidents(_mock_ctx)
 
     assert "Elevated error rates on console.redhat.com" in result
     assert "Impact: Major" in result
@@ -257,17 +286,19 @@ async def test_get_incidents_active_incident_format(
 
 async def test_get_incidents_uses_most_recent_update_only(
     incidents_response: dict,
+    _mock_ctx: MagicMock,
     _mock_fetch_incidents: AsyncMock,
 ) -> None:
     """Only the latest update body is shown, not older ones."""
     _mock_fetch_incidents.return_value = incidents_response
-    result = await get_incidents()
+    result = await get_incidents(_mock_ctx)
 
     assert "continuing to investigate elevated error rates" in result
     assert "We are investigating reports of elevated error rates" not in result
 
 
 async def test_get_incidents_handles_missing_updates(
+    _mock_ctx: MagicMock,
     _mock_fetch_incidents: AsyncMock,
 ) -> None:
     """Incidents with no updates show a fallback message."""
@@ -282,18 +313,19 @@ async def test_get_incidents_handles_missing_updates(
             }
         ]
     }
-    result = await get_incidents()
+    result = await get_incidents(_mock_ctx)
 
     assert "Storage API latency spike" in result
     assert "Latest Update: No updates posted yet" in result
 
 
 async def test_get_incidents_api_error(
+    _mock_ctx: MagicMock,
     _mock_fetch_incidents: AsyncMock,
 ) -> None:
     """API errors are surfaced in the response."""
     _mock_fetch_incidents.side_effect = RuntimeError("incident endpoint timeout")
-    result = await get_incidents()
+    result = await get_incidents(_mock_ctx)
 
     assert "Error fetching incidents" in result
     assert "incident endpoint timeout" in result
@@ -342,6 +374,7 @@ async def test_get_maintenances_scenarios(
     maintenances_upcoming: dict,
     maintenances_active: dict,
     maintenances_empty: dict,
+    _mock_ctx: MagicMock,
     _mock_fetch_maintenances: tuple[AsyncMock, AsyncMock],
 ) -> None:
     """Maintenance output varies correctly for empty, upcoming, active, and both."""
@@ -353,7 +386,7 @@ async def test_get_maintenances_scenarios(
     mock_upcoming, mock_active = _mock_fetch_maintenances
     mock_upcoming.return_value = fixture_map[upcoming_key]
     mock_active.return_value = fixture_map[active_key]
-    result = await get_maintenances()
+    result = await get_maintenances(_mock_ctx)
 
     for text in expected:
         assert text in result
@@ -362,29 +395,95 @@ async def test_get_maintenances_scenarios(
 
 
 async def test_get_maintenances_calls_both_endpoints(
+    _mock_ctx: MagicMock,
     _mock_fetch_maintenances: tuple[AsyncMock, AsyncMock],
 ) -> None:
     """Both upcoming and active endpoints are always called."""
     mock_upcoming, mock_active = _mock_fetch_maintenances
     mock_upcoming.return_value = {"scheduled_maintenances": []}
     mock_active.return_value = {"scheduled_maintenances": []}
-    await get_maintenances()
+    await get_maintenances(_mock_ctx)
 
     mock_upcoming.assert_awaited_once()
     mock_active.assert_awaited_once()
 
 
 async def test_get_maintenances_api_error(
+    _mock_ctx: MagicMock,
     _mock_fetch_maintenances: tuple[AsyncMock, AsyncMock],
 ) -> None:
     """API errors are surfaced in the response."""
     mock_upcoming, mock_active = _mock_fetch_maintenances
     mock_upcoming.side_effect = RuntimeError("maintenance backend offline")
     mock_active.return_value = {"scheduled_maintenances": []}
-    result = await get_maintenances()
+    result = await get_maintenances(_mock_ctx)
 
     assert "Error fetching maintenances" in result
     assert "maintenance backend offline" in result
+
+
+async def test_cache_hit_returns_cached_response(
+    _mock_ctx: MagicMock,
+    _mock_fetch_status: AsyncMock,
+) -> None:
+    """Second call within TTL returns cached result without hitting the API."""
+    _mock_fetch_status.return_value = {
+        "status": {"indicator": "none", "description": "All Systems Operational"}
+    }
+    result1 = await get_overall_status(_mock_ctx)
+    result2 = await get_overall_status(_mock_ctx)
+
+    assert result1 == result2
+    _mock_fetch_status.assert_awaited_once()
+
+
+async def test_cache_miss_after_ttl(
+    _mock_fetch_status: AsyncMock,
+) -> None:
+    """After TTL expiry, the cache misses and the API is called again."""
+    cache = TTLCache(maxsize=64, ttl=0)
+    cache_lock = asyncio.Lock()
+    ctx = MagicMock()
+    ctx.request_context.lifespan_context = {"cache": cache, "cache_lock": cache_lock}
+
+    _mock_fetch_status.return_value = {
+        "status": {"indicator": "none", "description": "All Systems Operational"}
+    }
+    await get_overall_status(ctx)
+    await get_overall_status(ctx)
+
+    assert _mock_fetch_status.await_count == 2
+
+
+async def test_cache_not_populated_on_error(
+    _mock_ctx: MagicMock,
+    _mock_fetch_status: AsyncMock,
+) -> None:
+    """Errors from the API are not cached; next call retries the API."""
+    request = httpx.Request("GET", "https://status.redhat.com/api/v2/status.json")
+    _mock_fetch_status.side_effect = [
+        httpx.ConnectError("failed", request=request),
+        {"status": {"indicator": "none", "description": "All Systems Operational"}},
+    ]
+    result1 = await get_overall_status(_mock_ctx)
+    result2 = await get_overall_status(_mock_ctx)
+
+    assert "Error fetching status" in result1
+    assert "All Systems Operational" in result2
+    assert _mock_fetch_status.await_count == 2
+
+
+async def test_components_cache_shared_between_tools(
+    _mock_ctx: MagicMock,
+    components_response: dict,
+    _mock_fetch_components: AsyncMock,
+) -> None:
+    """list_service_groups and get_service_group_details share the components cache."""
+    _mock_fetch_components.return_value = components_response
+    await list_service_groups(_mock_ctx)
+    await get_service_group_details(_mock_ctx, "console")
+
+    _mock_fetch_components.assert_awaited_once()
 
 
 def test_triage_service_issue_without_service() -> None:

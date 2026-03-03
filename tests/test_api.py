@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+from tenacity import wait_none
 
 api = importlib.import_module("redhat_status_mcp.api")
 
@@ -15,6 +16,15 @@ def _reset_client():
     api._client = None
     yield
     api._client = None
+
+
+@pytest.fixture(autouse=True)
+def _no_retry_sleep():
+    """Eliminate retry wait times for test performance."""
+    original_wait = api._fetch_json.retry.wait
+    api._fetch_json.retry.wait = wait_none()
+    yield
+    api._fetch_json.retry.wait = original_wait
 
 
 async def test_fetch_status_returns_parsed_json() -> None:
@@ -164,3 +174,83 @@ async def test_close_client_noop_when_none() -> None:
     """close_client is a no-op when no client is set."""
     await api.close_client()
     assert api._client is None
+
+
+async def test_retry_on_503_then_success() -> None:
+    """A transient 503 triggers retry; success on second attempt is returned."""
+    payload = {"status": {"indicator": "none"}}
+
+    request = httpx.Request("GET", "https://status.redhat.com/api/v2/status.json")
+    error_response = httpx.Response(status_code=503, request=request)
+    error = httpx.HTTPStatusError(
+        "Server error", request=request, response=error_response
+    )
+
+    success_response = MagicMock()
+    success_response.json.return_value = payload
+    success_response.raise_for_status = MagicMock()
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=[error, success_response])
+    api.set_client(mock_client)
+
+    result = await api.fetch_status()
+
+    assert result == payload
+    assert mock_client.get.await_count == 2
+
+
+async def test_no_retry_on_404() -> None:
+    """A 404 is not retried; error propagates immediately."""
+    request = httpx.Request("GET", "https://status.redhat.com/api/v2/status.json")
+    error_response = httpx.Response(status_code=404, request=request)
+    error = httpx.HTTPStatusError("Not found", request=request, response=error_response)
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=error)
+    api.set_client(mock_client)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await api.fetch_status()
+
+    assert mock_client.get.await_count == 1
+
+
+async def test_retry_on_connect_error() -> None:
+    """A ConnectError triggers retry; success on second attempt is returned."""
+    payload = {"status": {"indicator": "none"}}
+
+    request = httpx.Request("GET", "https://status.redhat.com/api/v2/status.json")
+    connect_error = httpx.ConnectError("Connection refused", request=request)
+
+    success_response = MagicMock()
+    success_response.json.return_value = payload
+    success_response.raise_for_status = MagicMock()
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=[connect_error, success_response])
+    api.set_client(mock_client)
+
+    result = await api.fetch_status()
+
+    assert result == payload
+    assert mock_client.get.await_count == 2
+
+
+async def test_retry_exhausted_propagates() -> None:
+    """After all retries exhausted, the original exception propagates."""
+    request = httpx.Request("GET", "https://status.redhat.com/api/v2/status.json")
+    error_response = httpx.Response(status_code=503, request=request)
+    error = httpx.HTTPStatusError(
+        "Server error", request=request, response=error_response
+    )
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(side_effect=error)
+    api.set_client(mock_client)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await api.fetch_status()
+
+    # max_retries=3 (default) → stop_after_attempt(4) → 4 total calls
+    assert mock_client.get.await_count == 4
