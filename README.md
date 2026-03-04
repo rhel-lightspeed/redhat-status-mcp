@@ -14,8 +14,7 @@ This is definitely a work in progress.
 | Tool | Description |
 |------|-------------|
 | `get_overall_status` | Top-level severity indicator (operational, minor, major, critical) |
-| `list_service_groups` | All service groups with status and child service counts |
-| `get_service_group_details` | Drill into a specific group's child services (fuzzy name match) |
+| `list_service_groups` | List all groups, or pass `group_name` to drill into one group's child services |
 | `get_incidents` | Currently unresolved incidents with impact, status, and latest updates |
 | `get_maintenances` | Active and upcoming scheduled maintenance windows |
 

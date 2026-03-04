@@ -11,7 +11,6 @@ from cachetools import TTLCache
 server = importlib.import_module("redhat_status_mcp.server")
 get_overall_status = server.get_overall_status
 list_service_groups = server.list_service_groups
-get_service_group_details = server.get_service_group_details
 get_incidents = server.get_incidents
 get_maintenances = server.get_maintenances
 triage_service_issue = server.triage_service_issue
@@ -189,7 +188,7 @@ async def test_list_service_groups_api_error(
     ],
     ids=["exact", "case-insensitive", "partial"],
 )
-async def test_get_service_group_details_successful_match(
+async def test_list_service_groups_successful_group_match(
     query: str,
     components_response: dict,
     _mock_ctx: MagicMock,
@@ -197,34 +196,34 @@ async def test_get_service_group_details_successful_match(
 ) -> None:
     """Exact, case-insensitive, and partial queries all resolve to the correct group."""
     _mock_fetch_components.return_value = components_response
-    result = await get_service_group_details(_mock_ctx, query)
+    result = await list_service_groups(_mock_ctx, query)
 
     assert "Group: console.redhat.com" in result
     assert "Ansible Automation Platform - Automation Hub" in result
     assert "Cost Management" in result
 
 
-async def test_get_service_group_details_no_match(
+async def test_list_service_groups_no_group_match(
     components_response: dict,
     _mock_ctx: MagicMock,
     _mock_fetch_components: AsyncMock,
 ) -> None:
-    """Unmatched query suggests using list_service_groups."""
+    """Unmatched query suggests listing available groups."""
     _mock_fetch_components.return_value = components_response
-    result = await get_service_group_details(_mock_ctx, "satellite")
+    result = await list_service_groups(_mock_ctx, "satellite")
 
     assert "No service group found" in result
-    assert "list_service_groups" in result
+    assert "without group_name" in result
 
 
-async def test_get_service_group_details_multiple_matches(
+async def test_list_service_groups_multiple_group_matches(
     components_response: dict,
     _mock_ctx: MagicMock,
     _mock_fetch_components: AsyncMock,
 ) -> None:
     """Ambiguous query returns all matching group names."""
     _mock_fetch_components.return_value = components_response
-    result = await get_service_group_details(_mock_ctx, "redhat.com")
+    result = await list_service_groups(_mock_ctx, "redhat.com")
 
     assert "Multiple service groups matched" in result
     assert "console.redhat.com" in result
@@ -232,28 +231,28 @@ async def test_get_service_group_details_multiple_matches(
     assert "bugzilla.redhat.com" in result
 
 
-async def test_get_service_group_details_lists_child_statuses(
+async def test_list_service_groups_group_details_include_child_statuses(
     components_response: dict,
     _mock_ctx: MagicMock,
     _mock_fetch_components: AsyncMock,
 ) -> None:
     """Child service statuses are formatted and included."""
     _mock_fetch_components.return_value = components_response
-    result = await get_service_group_details(_mock_ctx, "console")
+    result = await list_service_groups(_mock_ctx, "console")
 
     assert "Degraded Performance" in result
     assert "Partial Outage" in result
 
 
-async def test_get_service_group_details_api_error(
+async def test_list_service_groups_group_details_api_error(
     _mock_ctx: MagicMock,
     _mock_fetch_components: AsyncMock,
 ) -> None:
     """API errors are surfaced in the response."""
     _mock_fetch_components.side_effect = RuntimeError("components timeout")
-    result = await get_service_group_details(_mock_ctx, "console")
+    result = await list_service_groups(_mock_ctx, "console")
 
-    assert "Error fetching service group details" in result
+    assert "Error fetching service groups" in result
     assert "components timeout" in result
 
 
@@ -478,10 +477,10 @@ async def test_components_cache_shared_between_tools(
     components_response: dict,
     _mock_fetch_components: AsyncMock,
 ) -> None:
-    """list_service_groups and get_service_group_details share the components cache."""
+    """list and details modes share the same components cache."""
     _mock_fetch_components.return_value = components_response
     await list_service_groups(_mock_ctx)
-    await get_service_group_details(_mock_ctx, "console")
+    await list_service_groups(_mock_ctx, "console")
 
     _mock_fetch_components.assert_awaited_once()
 
@@ -493,7 +492,7 @@ def test_triage_service_issue_without_service() -> None:
     assert "get_overall_status" in result
     assert "get_incidents" in result
     assert "get_maintenances" in result
-    assert "get_service_group_details" not in result
+    assert "group_name=" not in result
 
 
 def test_triage_service_issue_with_service() -> None:
@@ -503,16 +502,17 @@ def test_triage_service_issue_with_service() -> None:
     assert "get_overall_status" in result
     assert "get_incidents" in result
     assert "get_maintenances" in result
-    assert "get_service_group_details" in result
+    assert "list_service_groups" in result
+    assert "group_name=" in result
     assert "console.redhat.com" in result
 
 
 def test_status_report_prompt() -> None:
-    """Status report prompt references all five tools in the recommended order."""
+    """Status report prompt references all four tools in the recommended order."""
     result = status_report()
 
     assert "get_overall_status" in result
     assert "list_service_groups" in result
     assert "get_incidents" in result
     assert "get_maintenances" in result
-    assert "get_service_group_details" in result
+    assert "group_name" in result

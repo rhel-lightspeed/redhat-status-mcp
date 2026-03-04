@@ -77,58 +77,8 @@ def _format_status(value: str) -> str:
     return value.replace("_", " ").title() if value else "Unknown"
 
 
-_READONLY_ANNOTATIONS = ToolAnnotations(
-    readOnlyHint=True,
-    destructiveHint=False,
-    idempotentHint=True,
-    openWorldHint=True,
-)
-
-
-@mcp.tool(annotations=_READONLY_ANNOTATIONS)
-async def get_overall_status(ctx: Context) -> str:
-    """Get the overall Red Hat service status.
-
-    Returns a severity indicator (operational, minor, major, or critical) with a
-    human-readable description. Call this first to decide whether deeper
-    investigation with get_incidents or get_service_group_details is needed.
-    """
-    logger.info("Tool called: get_overall_status")
-    try:
-        data = await _cached_fetch(ctx, "status", api.fetch_status)
-    except Exception as error:  # pragma: no cover - tested via mocked exception path
-        logger.exception("Failed to fetch overall status")
-        return f"Error fetching status: {error}"
-
-    status = data.get("status", {})
-    indicator = str(status.get("indicator", "none")).lower()
-    logger.info("Overall status indicator: %s", indicator)
-    description = status.get("description", "No status description available")
-    headline = _INDICATOR_LABELS.get(indicator, f"Status indicator: {indicator}")
-    return f"{headline}\nDescription: {description}"
-
-
-@mcp.tool(annotations=_READONLY_ANNOTATIONS)
-async def list_service_groups(ctx: Context) -> str:
-    """List all Red Hat service groups with current status and counts.
-
-    Use this to discover valid group names before calling
-    get_service_group_details.
-    """
-    logger.info("Tool called: list_service_groups")
-    try:
-        data = await _cached_fetch(ctx, "components", api.fetch_components)
-    except Exception as error:  # pragma: no cover - tested via mocked exception path
-        logger.exception("Failed to fetch service groups")
-        return f"Error fetching service groups: {error}"
-
-    components = data.get("components", [])
-    groups = [component for component in components if component.get("group")]
-    if not groups:
-        return "No service groups found."
-
-    logger.info("Found %d service groups", len(groups))
-
+def _render_service_group_list(groups: list[dict]) -> str:
+    """Render all service groups with status and child counts."""
     lines = ["Service Groups:"]
     for group in sorted(groups, key=lambda item: str(item.get("name", "")).casefold()):
         child_count = len(group.get("components", []))
@@ -143,10 +93,9 @@ async def list_service_groups(ctx: Context) -> str:
     return "\n".join(lines)
 
 
-def _find_groups(components: list[dict], query: str) -> list[dict]:
-    """Find group components by case-insensitive substring match."""
-    normalized_query = query.casefold()
-    groups = [component for component in components if component.get("group")]
+def _find_group_matches(groups: list[dict], group_name: str) -> list[dict]:
+    """Find service groups by case-insensitive substring match."""
+    normalized_query = group_name.casefold()
     return [
         group
         for group in groups
@@ -154,38 +103,14 @@ def _find_groups(components: list[dict], query: str) -> list[dict]:
     ]
 
 
-@mcp.tool(annotations=_READONLY_ANNOTATIONS)
-async def get_service_group_details(
-    ctx: Context,
-    group_name: Annotated[
-        str,
-        Field(
-            description="Case-insensitive substring to match against group names "
-            "(e.g. 'console' matches 'console.redhat.com'). "
-            "Call list_service_groups first to discover valid names."
-        ),
-    ],
+def _render_group_details(
+    components: list[dict], matches: list[dict], group_name: str
 ) -> str:
-    """Get details for a single service group.
-
-    Includes child services and their statuses. Accepts partial,
-    case-insensitive group names. If multiple groups match, the matching
-    names are returned so you can refine your query.
-    """
-    logger.info("Tool called: get_service_group_details (group_name=%r)", group_name)
-    try:
-        data = await _cached_fetch(ctx, "components", api.fetch_components)
-    except Exception as error:  # pragma: no cover - tested via mocked exception path
-        logger.exception("Failed to fetch service group details")
-        return f"Error fetching service group details: {error}"
-
-    components = data.get("components", [])
-    matches = _find_groups(components, group_name)
-    logger.info("Group query '%s' matched %d result(s)", group_name, len(matches))
+    """Render one matched group's child service status details."""
     if not matches:
         return (
             f"No service group found matching '{group_name}'. "
-            "Use list_service_groups to see available groups."
+            "Call list_service_groups without group_name to see available groups."
         )
 
     if len(matches) > 1:
@@ -221,6 +146,76 @@ async def get_service_group_details(
         child_status = _format_status(child.get("status", "unknown"))
         lines.append(f"- {child.get('name', 'Unnamed Service')} ({child_status})")
     return "\n".join(lines)
+
+
+_READONLY_ANNOTATIONS = ToolAnnotations(
+    readOnlyHint=True,
+    destructiveHint=False,
+    idempotentHint=True,
+    openWorldHint=True,
+)
+
+
+@mcp.tool(annotations=_READONLY_ANNOTATIONS)
+async def get_overall_status(ctx: Context) -> str:
+    """Get the overall Red Hat service status.
+
+    Returns a severity indicator (operational, minor, major, or critical) with a
+    human-readable description. Call this first to decide whether deeper
+    investigation with get_incidents or list_service_groups is needed.
+    """
+    logger.info("Tool called: get_overall_status")
+    try:
+        data = await _cached_fetch(ctx, "status", api.fetch_status)
+    except Exception as error:  # pragma: no cover - tested via mocked exception path
+        logger.exception("Failed to fetch overall status")
+        return f"Error fetching status: {error}"
+
+    status = data.get("status", {})
+    indicator = str(status.get("indicator", "none")).lower()
+    logger.info("Overall status indicator: %s", indicator)
+    description = status.get("description", "No status description available")
+    headline = _INDICATOR_LABELS.get(indicator, f"Status indicator: {indicator}")
+    return f"{headline}\nDescription: {description}"
+
+
+@mcp.tool(annotations=_READONLY_ANNOTATIONS)
+async def list_service_groups(
+    ctx: Context,
+    group_name: Annotated[
+        str | None,
+        Field(
+            description="Optional case-insensitive substring to match group names "
+            "(e.g. 'console' matches 'console.redhat.com'). "
+            "Leave empty to list all service groups."
+        ),
+    ] = None,
+) -> str:
+    """List service groups or drill into one group's child services.
+
+    When ``group_name`` is empty, returns all service groups with statuses and
+    child service counts. When provided, returns matching group details and
+    child service statuses.
+    """
+    logger.info("Tool called: list_service_groups (group_name=%r)", group_name)
+    try:
+        data = await _cached_fetch(ctx, "components", api.fetch_components)
+    except Exception as error:  # pragma: no cover - tested via mocked exception path
+        logger.exception("Failed to fetch service groups")
+        return f"Error fetching service groups: {error}"
+
+    components = data.get("components", [])
+    groups = [component for component in components if component.get("group")]
+    if not groups:
+        return "No service groups found."
+
+    if not group_name:
+        logger.info("Found %d service groups", len(groups))
+        return _render_service_group_list(groups)
+
+    matches = _find_group_matches(groups, group_name)
+    logger.info("Group query '%s' matched %d result(s)", group_name, len(matches))
+    return _render_group_details(components, matches, group_name)
 
 
 def _component_names(components: list[dict]) -> str:
@@ -358,8 +353,8 @@ def triage_service_issue(
     if service_name:
         return (
             f"{base}"
-            f"4. Call get_service_group_details with '{service_name}' to check "
-            "that specific service group.\n"
+            f"4. Call list_service_groups with group_name='{service_name}' to "
+            "check that specific service group.\n"
             "Summarize whether the issue is a known incident, planned "
             "maintenance, or potentially unreported."
         )
@@ -381,7 +376,8 @@ def status_report() -> str:
         "3. Call get_incidents for any unresolved incidents.\n"
         "4. Call get_maintenances for active and upcoming maintenance windows.\n"
         "5. For any service group not showing 'Operational', call "
-        "get_service_group_details to identify the affected child services.\n"
+        "list_service_groups with group_name set to that group to identify "
+        "the affected child services.\n"
         "Present the results as a structured status report with sections for "
         "overall health, incidents, maintenances, and degraded services."
     )
