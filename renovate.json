@@ -25,11 +25,6 @@
       "rangeStrategy": "bump"
     },
     {
-      "description": "Disable Python version updates",
-      "matchDatasources": ["python-version"],
-      "enabled": false
-    },
-    {
       "description": "Batch and auto-merge safe non-major dependency updates",
       "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "groupName": "all non-major dependencies",
@@ -37,6 +32,11 @@
       "schedule": ["before 5am on monday"],
       "automerge": true,
       "automergeType": "pr"
+    },
+    {
+      "description": "Disable Python version updates from pyenv manager",
+      "matchManagers": ["pyenv"],
+      "enabled": false
     }
   ]
 }
