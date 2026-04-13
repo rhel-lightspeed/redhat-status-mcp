@@ -37,6 +37,12 @@
       "description": "Disable Python version updates from pyenv manager",
       "matchManagers": ["pyenv"],
       "enabled": false
+    },
+    {
+      "description": "Disable requires-python updates in pyproject.toml",
+      "matchDepNames": ["python"],
+      "matchManagers": ["pep621"],
+      "enabled": false
     }
   ]
 }
