@@ -8,23 +8,20 @@ import pytest
 from tenacity import wait_none
 
 api = importlib.import_module("redhat_status_mcp.api")
+ServerConfig = importlib.import_module("redhat_status_mcp.config").ServerConfig
 
 
 @pytest.fixture(autouse=True)
-def _reset_client():
-    """Reset shared client before and after each test."""
+def _reset_api_state():
+    """Reset shared client and config before and after each test."""
     api._client = None
+    api.set_config(ServerConfig())
+    original_wait = api._retry_wait
+    api._retry_wait = wait_none()
     yield
     api._client = None
-
-
-@pytest.fixture(autouse=True)
-def _no_retry_sleep():
-    """Eliminate retry wait times for test performance."""
-    original_wait = api._fetch_json.retry.wait
-    api._fetch_json.retry.wait = wait_none()
-    yield
-    api._fetch_json.retry.wait = original_wait
+    api._config = None
+    api._retry_wait = original_wait
 
 
 async def test_fetch_status_returns_parsed_json() -> None:

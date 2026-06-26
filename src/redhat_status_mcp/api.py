@@ -4,8 +4,8 @@ import logging
 
 import httpx
 from tenacity import (
+    AsyncRetrying,
     RetryCallState,
-    retry,
     retry_if_exception,
     stop_after_attempt,
     wait_exponential,
@@ -15,9 +15,23 @@ from redhat_status_mcp.config import ServerConfig
 
 logger = logging.getLogger(__name__)
 
-_config = ServerConfig()
+_config: ServerConfig | None = None
+_retry_wait = wait_exponential(multiplier=1, min=0.5, max=10)
 
 _client: httpx.AsyncClient | None = None
+
+
+def set_config(config: ServerConfig) -> None:
+    """Set the shared server config for all API requests."""
+    global _config
+    _config = config
+
+
+def get_config() -> ServerConfig:
+    """Return the shared config, raising RuntimeError if not initialized."""
+    if _config is None:
+        raise RuntimeError("Config not initialized. Call set_config() first.")
+    return _config
 
 
 def set_client(client: httpx.AsyncClient) -> None:
@@ -57,21 +71,25 @@ def _is_retryable(exc: BaseException) -> bool:
     return isinstance(exc, (httpx.ConnectError, httpx.TimeoutException))
 
 
-@retry(
-    retry=retry_if_exception(_is_retryable),
-    stop=stop_after_attempt(_config.max_retries + 1),
-    wait=wait_exponential(multiplier=1, min=0.5, max=10),
-    before_sleep=_log_before_sleep,
-    reraise=True,
-)
 async def _fetch_json(path: str) -> dict:
     """Fetch and return JSON content from a Statuspage API path."""
-    url = f"{_config.base_url}/{path}"
-    logger.info("Fetching %s", url)
-    client = get_client()
-    response = await client.get(url)
-    response.raise_for_status()
-    return response.json()
+    config = get_config()
+    async for attempt in AsyncRetrying(
+        retry=retry_if_exception(_is_retryable),
+        stop=stop_after_attempt(config.max_retries + 1),
+        wait=_retry_wait,
+        before_sleep=_log_before_sleep,
+        reraise=True,
+    ):
+        with attempt:
+            url = f"{config.base_url}/{path}"
+            logger.info("Fetching %s", url)
+            client = get_client()
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.json()
+    # ponytail: unreachable — AsyncRetrying always returns or raises
+    raise RuntimeError("Retry loop exited unexpectedly")  # pragma: no cover
 
 
 async def fetch_status() -> dict:
