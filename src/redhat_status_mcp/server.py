@@ -21,6 +21,7 @@ from redhat_status_mcp.config import ServerConfig
 async def app_lifespan(server: FastMCP) -> AsyncIterator[dict]:
     """Manage shared resources for the lifetime of the MCP server."""
     config = ServerConfig()
+    api.set_config(config)
     limits = httpx.Limits(max_connections=config.max_connections)
     timeout = httpx.Timeout(config.request_timeout)
     client = httpx.AsyncClient(limits=limits, timeout=timeout)
